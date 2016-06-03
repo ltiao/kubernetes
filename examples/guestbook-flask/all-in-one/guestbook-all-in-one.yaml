@@ -162,22 +162,22 @@ spec:
     spec:
       containers:
       - name: flask-redis
-      image: tiao/gb-frontend-flask-redis
-      resources:
-        requests:
-          cpu: 100m
-          memory: 100Mi
-      env:
-      - name: GET_HOSTS_FROM
-        value: dns
-        # If your cluster config does not include a dns service, then to
-        # instead access environment variables to find service host
-        # info, comment out the 'value: dns' line above, and uncomment the
-        # line below.
-        # value: env
-      ports:
-      - containerPort: 8080
+        image: tiao/gb-frontend-flask-redis
+        resources:
+          requests:
+            cpu: 100m
+            memory: 100Mi
+        env:
+        - name: GET_HOSTS_FROM
+          value: dns
+          # If your cluster config does not include a dns service, then to
+          # instead access environment variables to find service host
+          # info, comment out the 'value: dns' line above, and uncomment the
+          # line below.
+          # value: env
+        ports:
+        - containerPort: 8080
       - name: nginx
-      image: tiao/gb-frontend-nginx
-      ports:
-      - containerPort: 80
+        image: tiao/gb-frontend-nginx
+        ports:
+        - containerPort: 80
