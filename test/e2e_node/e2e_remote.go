@@ -57,30 +57,17 @@ func CreateTestArchive() string {
 	// Build the executables
 	buildGo()
 
-	// Build the e2e tests into an executable
-	glog.Infof("Building ginkgo k8s test binaries...")
-	testDir, err := getK8sNodeTestDir()
-	if err != nil {
-		glog.Fatalf("Failed to locate test/e2e_node directory %v.", err)
-	}
-	cmd := exec.Command("ginkgo", "build", testDir)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	err = cmd.Run()
-	if err != nil {
-		glog.Fatalf("Failed to build e2e tests under %s %v\n", testDir, err)
-	}
-	ginkgoTest := filepath.Join(testDir, "e2e_node.test")
-	if _, err := os.Stat(ginkgoTest); err != nil {
-		glog.Fatalf("Failed to locate test binary %s", ginkgoTest)
-	}
-	defer os.Remove(ginkgoTest)
-
 	// Make sure we can find the newly built binaries
 	buildOutputDir, err := getK8sBuildOutputDir()
 	if err != nil {
 		glog.Fatalf("Failed to locate kubernetes build output directory %v", err)
 	}
+
+	ginkgoTest := filepath.Join(buildOutputDir, "e2e_node.test")
+	if _, err := os.Stat(ginkgoTest); err != nil {
+		glog.Fatalf("Failed to locate test binary %s", ginkgoTest)
+	}
+
 	kubelet := filepath.Join(buildOutputDir, "kubelet")
 	if _, err := os.Stat(kubelet); err != nil {
 		glog.Fatalf("Failed to locate binary %s", kubelet)
@@ -124,9 +111,19 @@ func CreateTestArchive() string {
 	return filepath.Join(dir, archiveName)
 }
 
-// RunRemote copies the archive file to a /tmp file on host, unpacks it, and runs the e2e_node.test
 // Returns the command output, whether the exit was ok, and any errors
-func RunRemote(archive string, host string, cleanup bool, junitFileNumber int) (string, bool, error) {
+func RunRemote(archive string, host string, cleanup bool, junitFileNumber int, setupNode bool) (string, bool, error) {
+	if setupNode {
+		uname, err := user.Current()
+		if err != nil {
+			return "", false, fmt.Errorf("could not find username: %v", err)
+		}
+		output, err := RunSshCommand("ssh", host, "--", "sudo", "usermod", "-a", "-G", "docker", uname.Username)
+		if err != nil {
+			return "", false, fmt.Errorf("Instance %s not running docker daemon - Command failed: %s", host, output)
+		}
+	}
+
 	// Create the temp staging directory
 	glog.Infof("Staging test binaries on %s", host)
 	tmp := fmt.Sprintf("/tmp/gcloud-e2e-%d", rand.Int31())

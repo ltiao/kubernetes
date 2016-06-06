@@ -253,6 +253,13 @@ function assemble-docker-flags {
   if [[ "${TEST_CLUSTER:-}" == "true" ]]; then
     docker_opts+=" --debug"
   fi
+  # Decide whether to enable a docker registry mirror. This is taken from
+  # the "kube-env" metadata value.
+  if [[ -n "${DOCKER_REGISTRY_MIRROR_URL:-}" ]]; then
+    echo "Enable docker registry mirror at: ${DOCKER_REGISTRY_MIRROR_URL}"
+    docker_opts+=" --registry-mirror=${DOCKER_REGISTRY_MIRROR_URL}"
+  fi
+
   echo "DOCKER_OPTS=\"${docker_opts} ${EXTRA_DOCKER_OPTS:-}\"" > /etc/default/docker
 }
 
@@ -624,7 +631,7 @@ function start-kube-scheduler {
 
 # Starts cluster autoscaler.
 function start-cluster-autoscaler {
-  if [ "${ENABLE_NODE_AUTOSCALER:-}" = "true" ]; then
+  if [[ "${ENABLE_NODE_AUTOSCALER:-}" == "true" ]]; then
     echo "Start kubernetes cluster autoscaler"
     prepare-log-file /var/log/cluster-autoscaler.log
 
@@ -712,9 +719,6 @@ function start-kube-addons {
     sed -i -e "s@{{ *metrics_memory_per_node *}}@${metrics_memory_per_node}@g" "${controller_yaml}"
     sed -i -e "s@{{ *eventer_memory_per_node *}}@${eventer_memory_per_node}@g" "${controller_yaml}"
   fi
-  if [[ "${ENABLE_L7_LOADBALANCING:-}" == "glbc" ]]; then
-    setup-addon-manifests "addons" "cluster-loadbalancing/glbc"
-  fi
   if [[ "${ENABLE_CLUSTER_DNS:-}" == "true" ]]; then
     setup-addon-manifests "addons" "dns"
     local -r dns_rc_file="${dst_dir}/dns/skydns-rc.yaml"
@@ -746,6 +750,13 @@ function start-kube-addons {
   if [[ "${ENABLE_CLUSTER_UI:-}" == "true" ]]; then
     setup-addon-manifests "addons" "dashboard"
   fi
+  if [[ "${ENABLE_NODE_PROBLEM_DETECTOR:-}" == "true" ]]; then
+    setup-addon-manifests "addons" "node-problem-detector"
+    local -r node_problem_detector_file="${dst_dir}/node-problem-detector/node-problem-detector.yaml"
+    mv "${dst_dir}/node-problem-detector/node-problem-detector.yaml.in" "${node_problem_detector_file}"
+    # Replace the salt configurations with variable values.
+    sed -i -e "s@{{ *pillar\['master_node'\] *}}@${MASTER_NAME}@g" "${node_problem_detector_file}"
+  fi
   if echo "${ADMISSION_CONTROL:-}" | grep -q "LimitRanger"; then
     setup-addon-manifests "admission-controls" "limit-range"
   fi
@@ -760,7 +771,9 @@ function start-fluentd {
   if [[ "${ENABLE_NODE_LOGGING:-}" == "true" ]]; then
     if [[ "${LOGGING_DESTINATION:-}" == "gcp" ]]; then
       cp "${KUBE_HOME}/kube-manifests/kubernetes/fluentd-gcp.yaml" /etc/kubernetes/manifests/
-    elif [[ "${LOGGING_DESTINATION:-}" == "elasticsearch" ]]; then
+    elif [[ "${LOGGING_DESTINATION:-}" == "elasticsearch" && "${KUBERNETES_MASTER:-}" != "true" ]]; then
+      # Running fluentd-es on the master is pointless, as it can't communicate
+      # with elasticsearch from there in the default configuration.
       cp "${KUBE_HOME}/kube-manifests/kubernetes/fluentd-es.yaml" /etc/kubernetes/manifests/
     fi
   fi
@@ -771,8 +784,9 @@ function start-lb-controller {
   if [[ "${ENABLE_L7_LOADBALANCING:-}" == "glbc" ]]; then
     echo "Starting GCE L7 pod"
     prepare-log-file /var/log/glbc.log
-    local -r src_file="${KUBE_HOME}/kube-manifests/kubernetes/gci-trusty/glbc.manifest"
-    cp "${src_file}" /etc/kubernetes/manifests/
+    setup-addon-manifests "addons" "cluster-loadbalancing/glbc"
+    cp "${KUBE_HOME}/kube-manifests/kubernetes/gci-trusty/glbc.manifest" \
+       /etc/kubernetes/manifests/
   fi
 }
 
